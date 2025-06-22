@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.h5
+*.keras
+.env
+.DS_Store
+.vscode/
+.idea/

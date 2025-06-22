@@ -1,0 +1,6 @@
+opencv-python
+mediapipe
+tensorflow
+numpy
+PyQt5
+python-vlc
