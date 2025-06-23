@@ -54,27 +54,6 @@ The following table lists the recognized gestures and their corresponding media 
 | Two Reversed       | Skip Backward    | ⏪     |
 | Stop               | Quit App         | 🛑     |
 
----
-
-## Directory Structure
-<pre>
-│  app.py
-│  model/
-│      mobilenetv3_hagrid_finetuned.keras
-│      gesture_classifier.tflite
-│      gesture_labels.csv
-│  videos/
-│  scripts/
-│      fromKeras_to_tflite.py
-│      generate_crops.py
-│      install_dataset.py
-│  notebooks/
-│      HaGRID_mobilenetv3_2.ipynb
-
-
-</pre>
-
----
 
 ## How it Works
 1. **Hand Detection**: Uses MediaPipe Hands to detect hand landmarks in the webcam frame.
@@ -110,6 +89,4 @@ This project is licensed under the MIT License.
 
 ---
 
-## Author
-**Ali Ramadan**  
 Final Year Project
