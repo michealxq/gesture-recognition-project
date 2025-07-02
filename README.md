@@ -89,10 +89,8 @@ This project is licensed under the MIT License.
 
 ---
 
-<<<<<<< HEAD
+
 ## Author
 **Ali Ramadan**  
 
-=======
-Final Year Project
->>>>>>> 4ec29405c8fa825ffa2a1cdf1c1127e499964b49
+
