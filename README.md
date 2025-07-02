@@ -72,7 +72,7 @@ For training instructions, see the companion notebook:
 ---
 
 ## Screenshots
-![screenshot]()
+![screenshot](image.png)
 
 ---
 
