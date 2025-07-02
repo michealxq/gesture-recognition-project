@@ -1,4 +1,3 @@
-
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -38,6 +37,7 @@ GESTURE_COMMANDS = {
     "stop":             "quit",
 }
 
+
 # === GESTURE RECOGNIZER ===
 class GestureRecognizer:
     def __init__(self,
@@ -45,11 +45,9 @@ class GestureRecognizer:
                  label_csv=LABEL_CSV,
                  conf_thresh=CONF_THRESH,
                  pad=0.5):
-        # load labels
         with open(label_csv, newline="") as f:
             self.labels = [r[0] for r in csv.reader(f) if r]
 
-        # load Keras model
         self.model = tf.keras.models.load_model(model_path)
         _, h, w, _ = self.model.input_shape
         self.H, self.W = h, w
@@ -57,7 +55,6 @@ class GestureRecognizer:
         self.conf_thresh = conf_thresh
         self.pad = pad
 
-        # MediaPipe for hand detection
         self.hands = mp.solutions.hands.Hands(
             static_image_mode=False,
             max_num_hands=1,
@@ -66,16 +63,11 @@ class GestureRecognizer:
         )
 
     def predict(self, frame):
-        """
-        Returns a tuple (label, confidence, crop_box)
-        or (None, 0.0, None) if no confident prediction.
-        """
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = self.hands.process(rgb)
         if not res.multi_hand_landmarks:
             return None, 0.0, None
 
-        # get pixel coordinates of hand landmarks
         h0, w0, _ = frame.shape
         pts = [(int(lm.x * w0), int(lm.y * h0))
                for lm in res.multi_hand_landmarks[0].landmark]
@@ -85,7 +77,6 @@ class GestureRecognizer:
         side = max(x1 - x0, y1 - y0)
         cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
 
-        # padded square crop
         pad_px = int(side * self.pad)
         half = side // 2 + pad_px
         x0_ = max(0, cx - half)
@@ -96,13 +87,11 @@ class GestureRecognizer:
         if crop.size == 0:
             return None, 0.0, None
 
-        # remember for drawing
         crop_box = (x0_, y0_, x1_, y1_)
 
-        # preprocess for model
         img = cv2.resize(crop, (self.W, self.H))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
-        img = preprocess_input(img)              # [-1,1] for MobileNetV3
+        img = preprocess_input(img)
         inp = np.expand_dims(img, 0)
 
         out = self.model.predict(inp, verbose=0)[0]
@@ -112,14 +101,22 @@ class GestureRecognizer:
 
         return label, conf, crop_box
 
+
 # === MAIN WINDOW ===
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gesture‐Controlled Media Player")
-        self.setFixedSize(1000, 600)
+        self.setWindowTitle("Gesture-Controlled Media Player")
+        self.showMaximized()
+        # self.showFullScreen()
 
-        # video list
+
+        # Check camera availability
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            QtWidgets.QMessageBox.critical(self, "Error", "Could not open webcam!")
+            sys.exit(1)
+
         self.videos = sorted(
             os.path.join(VIDEO_DIR, f)
             for f in os.listdir(VIDEO_DIR)
@@ -129,20 +126,14 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Error", "No .mp4 files in videos/")
             sys.exit(1)
 
-        # VLC player
         self.player = vlc.Instance("--quiet").media_player_new()
-
-        # recognizer
         self.recognizer = GestureRecognizer()
         self.hold_counts = {g: 0 for g in GESTURE_COMMANDS}
         self.last_cmd = None
 
-        # webcam
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_WIDTH)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
 
-        # load icons (optional)
         self.icons = {}
         icon_path = "icons"
         for act in GESTURE_COMMANDS.values():
@@ -153,113 +144,212 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._start_timers()
 
-        # start on first video
         self.idx = 0
         self._load(self.idx)
         self.player.play()
 
+        self._apply_styles()
+    
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.showNormal()
+    
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #ffffff;
+            }
+            QLabel {
+                color: #000000;
+            }
+            QGroupBox {
+                border: 1px solid #aaa;
+                margin-top: 10px;
+                font-weight: bold;
+                color: #000000;
+            }
+            QGroupBox:title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+            }
+            QProgressBar {
+                height: 18px;
+                text-align: center;
+                border: 1px solid #888;
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                background-color: #4caf50;
+            }
+            QSlider::groove:horizontal {
+                height: 8px;
+                background: #cccccc;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #4caf50;
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                margin: -3px 0;
+            }
+            QScrollArea {
+                background-color: #ffffff;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: #ffffff;
+            }
+            QWidget {
+                background-color: #ffffff;
+                color: #000000;
+            }
+        """)
+
     def _build_ui(self):
         w = QtWidgets.QWidget()
         self.setCentralWidget(w)
-        main_layout = QtWidgets.QHBoxLayout(w)
+        layout = QtWidgets.QHBoxLayout(w)
 
-        # === LEFT PANEL ===
         left_panel = QtWidgets.QVBoxLayout()
 
-        # --- Status Section ---
+        # Status group
+        grp_status = QtWidgets.QGroupBox("Gesture Status")
+        status_layout = QtWidgets.QVBoxLayout(grp_status)
+
         self.lbl_gst = QtWidgets.QLabel("Gesture: –")
-        self.lbl_gst.setStyleSheet("font:14pt; color:blue;")
-        left_panel.addWidget(self.lbl_gst)
+        self.lbl_gst.setStyleSheet("font: bold 16pt; color: #4caf50;")
+        status_layout.addWidget(self.lbl_gst)
 
         self.conf_bar = QtWidgets.QProgressBar()
         self.conf_bar.setRange(0, 100)
-        left_panel.addWidget(self.conf_bar)
+        status_layout.addWidget(self.conf_bar)
 
         self.lbl_vol = QtWidgets.QLabel("Vol: 50%")
-        self.lbl_vol.setStyleSheet("font:14pt; color:green;")
-        left_panel.addWidget(self.lbl_vol)
+        self.lbl_vol.setStyleSheet("font: bold 16pt; color: #f9a825;")
+        status_layout.addWidget(self.lbl_vol)
 
-        left_panel.addWidget(QtWidgets.QLabel("Crop padding"))
+        self.lbl_feedback = QtWidgets.QLabel("")
+        self.lbl_feedback.setStyleSheet("font: bold 14pt; color: #ffffff;")
+        status_layout.addWidget(self.lbl_feedback)
+
+        left_panel.addWidget(grp_status)
+
+        # Crop slider
+        grp_crop = QtWidgets.QGroupBox("Crop Padding")
+        crop_layout = QtWidgets.QVBoxLayout(grp_crop)
         self.pad_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.pad_slider.setRange(0, 100)
         self.pad_slider.setValue(int(self.recognizer.pad * 100))
         self.pad_slider.valueChanged.connect(
             lambda v: setattr(self.recognizer, "pad", v / 100)
         )
-        left_panel.addWidget(self.pad_slider)
+        crop_layout.addWidget(self.pad_slider)
+        left_panel.addWidget(grp_crop)
 
-        # --- Controls Info Section ---
-        
-        # Emojis for gesture and actions
+        # Controls group
+        grp_controls = QtWidgets.QGroupBox("Hand Gesture Controls")
+        controls_layout = QtWidgets.QVBoxLayout(grp_controls)
+
         gesture_display = {
-            "palm":             "🖐️ Palm              ",
-            "fist":             "✊ Fist              ",
-            "call":             "🤙 Call              ",
-            "rock":             "🤘 Rock              ",
-            "like":             "👍 Like              ",
-            "dislike":          "👎 Dislike           ",
-            "two_up":           "✌️ Two Up            ",
-            "two_up_inverted":  "✌️ Two reversed",
-            "stop":             "✋ Stop              "
+            "palm": "🖐 Palm",
+            "fist": "✊ Fist",
+            "call": "🤙 Call",
+            "rock": "🤘 Rock",
+            "like": "👍 Like",
+            "dislike": "👎 Dislike",
+            "two_up": "✌️ Two Up",
+            "two_up_inverted": "✌️ Two Reversed",
+            "stop": "✋ Stop",
         }
 
         action_emojis = {
-            "play":        "▶️",
-            "pause":       "⏸️",
-            "next":        "⏭️",
-            "prev":        "⏮️",
-            "vol_up":      "🔊",
-            "vol_down":    "🔉",
-            "skip_fwd":    "⏩",
-            "skip_back":   "⏪",
-            "quit":        "🛑",
+            "play": "▶️",
+            "pause": "⏸️",
+            "next": "⏭️",
+            "prev": "⏮️",
+            "vol_up": "🔊",
+            "vol_down": "🔉",
+            "skip_fwd": "⏩",
+            "skip_back": "⏪",
+            "quit": "🛑",
         }
 
-        # Format rows with padded columns
-        rows = []
-        for g_key, action in GESTURE_COMMANDS.items():
-            gesture_name = gesture_display.get(g_key, g_key)
-            action_icon = action_emojis.get(action, "")
-            rows.append(f"{gesture_name:<40} | {action:<12} {action_icon}")
+        # Create inner widget for scroll area
+        scroll_widget = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(scroll_widget)
 
-        # Build final text
-        controls_text = "🧠 Hand Gestures and Controls:\n\n" + "\n".join(rows)
+        for row, (g_key, action) in enumerate(GESTURE_COMMANDS.items()):
+            gesture_label = QtWidgets.QLabel(gesture_display.get(g_key, g_key))
+            gesture_label.setStyleSheet("font: 12pt; color: #000000;")
 
-        self.lbl_controls = QtWidgets.QLabel(controls_text)
-        self.lbl_controls.setStyleSheet("font:10pt; font-family: monospace;")
-        self.lbl_controls.setWordWrap(True)
+            action_label = QtWidgets.QLabel(action)
+            action_label.setStyleSheet("font: 12pt; color: #000000;")
 
-        self.lbl_controls.setStyleSheet("font:10pt;")
-        self.lbl_controls.setWordWrap(True)
-        left_panel.addWidget(self.lbl_controls)
+            icon_text = action_emojis.get(action, "")
+            action_icon = QtWidgets.QLabel(icon_text)
+            action_icon.setStyleSheet("font: 12pt;color: #000000")
 
-        left_panel.addStretch()
-        main_layout.addLayout(left_panel)
+            grid.addWidget(gesture_label, row, 0)
+            grid.addWidget(action_label, row, 1)
+            grid.addWidget(action_icon, row, 2)
 
-        # === RIGHT PANEL ===
+        # Tweak column spacing for nice alignment
+        grid.setColumnStretch(0, 3)
+        grid.setColumnStretch(1, 2)
+        grid.setColumnStretch(2, 1)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(scroll_widget)
+        scroll.setStyleSheet("background-color: #ffffff; border: none;")
+
+
+        controls_layout.addWidget(scroll)
+
+        left_panel.addWidget(grp_controls)
+
+        layout.addLayout(left_panel)  
+
+        # RIGHT PANEL
         right_panel = QtWidgets.QVBoxLayout()
 
-        # --- Camera Feed ---
         self.lbl_cam = QtWidgets.QLabel()
-        self.lbl_cam.setFixedSize(CAM_WIDTH, CAM_HEIGHT)
+        self.lbl_cam.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                           QtWidgets.QSizePolicy.Expanding)
         right_panel.addWidget(self.lbl_cam, alignment=QtCore.Qt.AlignCenter)
 
-        # --- Video Player ---
         self.vframe = QtWidgets.QFrame()
-        self.vframe.setFixedSize(640, 360)
-        right_panel.addWidget(self.vframe, alignment=QtCore.Qt.AlignCenter)
+        self.vframe.setMinimumSize(640, 360)
+        self.vframe.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                          QtWidgets.QSizePolicy.Expanding)
+        self.vframe.setStyleSheet("background-color: black; border: 1px solid #555;")
+        video_container = QtWidgets.QHBoxLayout()
+        video_container.addStretch()
+        video_container.addWidget(self.vframe)
+        video_container.addStretch()
+        right_panel.addLayout(video_container)
 
         self.lbl_vid = QtWidgets.QLabel()
-        self.lbl_vid.setStyleSheet("font:16pt;")
+        self.lbl_vid.setWordWrap(True)
+        self.lbl_vid.setStyleSheet("font: bold 14pt; color: #000000;")
         right_panel.addWidget(self.lbl_vid, alignment=QtCore.Qt.AlignCenter)
+
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setRange(0, 1000)
+        right_panel.addWidget(self.slider)
+
+        self.lbl_time = QtWidgets.QLabel("00:00 / 00:00")
+        self.lbl_time.setStyleSheet("font: 12pt;")
+        right_panel.addWidget(self.lbl_time, alignment=QtCore.Qt.AlignCenter)
 
         if sys.platform.startswith("win"):
             self.player.set_hwnd(int(self.vframe.winId()))
         else:
             self.player.set_xwindow(self.vframe.winId())
 
-        main_layout.addLayout(right_panel)
-
+        layout.addLayout(right_panel)
 
     def _start_timers(self):
         self.tcam = QtCore.QTimer(self)
@@ -268,7 +358,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tv = QtCore.QTimer(self)
         self.tv.timeout.connect(self._update_video_label)
-        self.tv.start(200)
+        self.tv.start(300)
 
     def _load(self, i):
         m = vlc.Instance("--quiet").media_new(self.videos[i])
@@ -280,51 +370,45 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_video_label(self):
         self.lbl_vid.setText(f"Video: {os.path.basename(self.videos[self.idx])}")
 
+        length = self.player.get_length()
+        pos = self.player.get_time()
+        if length > 0:
+            secs_total = length // 1000
+            secs_pos = pos // 1000
+            self.lbl_time.setText(
+                f"{secs_pos//60:02d}:{secs_pos%60:02d} / {secs_total//60:02d}:{secs_total%60:02d}"
+            )
+            self.slider.setValue(int(pos / length * 1000))
+        else:
+            self.lbl_time.setText("00:00 / 00:00")
+
     def _update_frame(self):
         ret, frame = self.cap.read()
         if not ret:
             return
         frame = cv2.flip(frame, 1)
 
-        # midline_y = frame.shape[0] // 2
-        # cv2.line(frame, (0, midline_y), (frame.shape[1], midline_y), (0, 0, 255), 2)
-
-        # predict
         gst, conf, box = self.recognizer.predict(frame)
-        # gst, conf, box = None, 0.0, None
-        # pred_label, pred_conf, pred_box = self.recognizer.predict(frame)
 
-        # # Only accept predictions above the midline
-        # if pred_box:
-        #     _, y0, _, y1 = pred_box
-        #     midline_y = frame.shape[0] // 2
-        #     if y1 < midline_y:  # whole hand above the line
-        #         gst, conf, box = pred_label, pred_conf, pred_box
-
-        # draw crop box
         if box:
             cv2.rectangle(frame,
                           (box[0], box[1]),
                           (box[2], box[3]),
-                          (0,255,0), 2)
+                          (0, 255, 0), 2)
 
-        # update confidence bar
         self.conf_bar.setValue(int(conf * 100))
 
-        # hold-to-activate logic
         if gst in GESTURE_COMMANDS:
             self.hold_counts[gst] += 1
             if self.hold_counts[gst] >= HOLD_FRAMES and gst != self.last_cmd:
                 self._apply(GESTURE_COMMANDS[gst])
                 self.last_cmd = gst
-        # reset others
         for g in list(self.hold_counts):
             if g != gst:
                 self.hold_counts[g] = 0
 
         self.lbl_gst.setText(f"Gesture: {gst or '–'}")
 
-        # show webcam with box
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h0, w0, _ = rgb.shape
         img = QtGui.QImage(rgb.data, w0, h0, w0*3, QtGui.QImage.Format_RGB888)
@@ -334,13 +418,16 @@ class MainWindow(QtWidgets.QMainWindow):
         pix = self.icons.get(action)
         if pix:
             lbl = QtWidgets.QLabel(self.vframe)
-            lbl.setPixmap(pix)
+            lbl.setPixmap(pix.scaled(64, 64, QtCore.Qt.KeepAspectRatio))
             lbl.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
-            lbl.move((640-pix.width())//2, (360-pix.height())//2)
+            lbl.move((640 - 64)//2, (360 - 64)//2)
             lbl.show()
             QtCore.QTimer.singleShot(700, lbl.deleteLater)
 
     def _apply(self, action):
+        self.lbl_feedback.setText(f"Action: {action.upper()}")
+        QtCore.QTimer.singleShot(1500, lambda: self.lbl_feedback.clear())
+
         if action == "play":
             self.player.play()
         elif action == "pause":
@@ -370,7 +457,6 @@ class MainWindow(QtWidgets.QMainWindow):
         elif action == "quit":
             self.close()
 
-        # flash corresponding icon
         self._flash_icon(action)
 
     def closeEvent(self, event):
